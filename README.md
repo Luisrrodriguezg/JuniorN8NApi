@@ -125,8 +125,8 @@ Then open:
 ### 1. Create `.env` in the project root
 
 ```env
-N8N_USER=admin
-N8N_PASSWORD=changeme123
+N8N_USER=****
+N8N_PASSWORD=*****
 ```
 
 ### 2. Build and start
