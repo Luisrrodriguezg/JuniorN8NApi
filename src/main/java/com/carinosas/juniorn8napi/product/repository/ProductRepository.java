@@ -21,6 +21,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
              AND (:type IS NULL OR p.type = :type)
              AND (:size IS NULL OR p.size = :size)
            ORDER BY p.name ASC
+                      
            """)
     List<Product> search(String name, ProductType type, Size size);
 }
