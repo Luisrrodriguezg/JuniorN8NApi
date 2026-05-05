@@ -1,79 +1,93 @@
-# Junior N8N API
+# Junior Store Chatbot
 
-Read-only product catalog API for **Junior de Barranquilla** merchandise, designed to be consumed by an AI chatbot built in n8n. The API exposes endpoints to query products, check availability, and get pricing — no purchase or write operations.
-
-This is a **mockup project**: data resets on every restart, no authentication, in-memory database.
+API REST y chatbot conversacional para la tienda oficial de Junior de Barranquilla. Los hinchas pueden consultar productos, precios y disponibilidad a través de un bot de Telegram impulsado por un agente de IA.
 
 ---
 
-## Stack
+## Tecnologías
 
-- **Java 21** + **Spring Boot 3.3**
-- **Spring Web** — REST endpoints
-- **Spring Data JPA** — data access
-- **H2** — in-memory database
-- **Lombok** — boilerplate reduction
-- **Docker** — containerized API + n8n
+**Backend (API)**
+- Java 21
+- Spring Boot 3.3 (Web, Data JPA, Validation)
+- H2 (base de datos en memoria)
+- Lombok
+- Maven
+
+**Orquestación del chatbot**
+- n8n (plataforma de automatización con IA)
+- LLM: OpenAI GPT-4o-mini (modelo del agente)
+- Telegram Bot API (interfaz de usuario)
+
+**Infraestructura**
+- Docker + Docker Compose
+- ngrok (túnel HTTPS público para desarrollo)
 
 ---
 
-## Architecture
+## Arquitectura
 
-Layered monolith, organized by feature.
+Monolito en capas, organizado por feature, expuesto vía REST y consumido por un agente de IA.
 
 ```
-com.carinosas.juniorn8napi
-└── product
-    ├── controller        ← REST endpoints
-    ├── service           ← business logic (low-stock rule, filtering)
-    ├── repository        ← Spring Data JPA
-    ├── domain            ← entity + enums
-    ├── dto               ← API response shapes
-    ├── mapper            ← entity → DTO
-    └── exception         ← custom exceptions + global handler
+┌──────────┐    ┌─────────┐    ┌─────────────────┐    ┌──────────────┐
+│  Usuario │───▶│Telegram │───▶│ n8n (AI Agent)  │───▶│  Spring API  │
+│          │◀───│   Bot   │◀───│ + LLM + Tools   │◀───│  (catálogo)  │
+└──────────┘    └─────────┘    └─────────────────┘    └──────┬───────┘
+                                                             │
+                                                       ┌─────▼─────┐
+                                                       │  H2 (in   │
+                                                       │  memory)  │
+                                                       └───────────┘
 ```
 
-**Data flow:** `Controller → Service → Repository → DB`, with `Mapper` converting entities to DTOs before responses leave the service.
+**Capas de la API (Spring Boot):**
+
+```
+com.carinosas.juniorn8napi.product
+├── controller    ← endpoints REST
+├── service       ← lógica de negocio (low-stock, filtros)
+├── repository    ← acceso a datos (Spring Data JPA)
+├── domain        ← entidad Product + enums (Size, ProductType)
+├── dto           ← contratos de respuesta JSON
+├── mapper        ← entidad → DTO (campos derivados)
+└── exception     ← manejo global de errores
+```
+
+Flujo de datos: `Controller → Service → Repository → DB`. El `Mapper` convierte entidades a DTOs antes de responder.
 
 ---
 
-## Domain model
+## Modelo de dominio
 
-Single `Product` entity:
+Entidad única `Product`:
 
-| Field    | Type           | Notes                                      |
-|----------|----------------|--------------------------------------------|
-| `id`     | `Long`         | Auto-generated                             |
-| `name`   | `String`       | e.g. "Camiseta Local 2025"                 |
-| `type`   | `ProductType`  | enum (see below)                           |
-| `size`   | `Size`         | enum (see below)                           |
-| `price`  | `BigDecimal`   | COP, stored with 2 decimal precision       |
-| `stock`  | `Integer`      | Drives `available` and `lowStock` flags    |
+| Campo  | Tipo          | Notas                                       |
+|--------|---------------|---------------------------------------------|
+| id     | Long          | Auto-generado                               |
+| name   | String        | "Camiseta Local 2025"                       |
+| type   | ProductType   | Enum (jersey local, gorra, peluche, etc.)   |
+| size   | Size          | S, M, L, XL, None                           |
+| price  | BigDecimal    | COP, precisión 2 decimales                  |
+| stock  | Integer       | Cantidad en inventario                      |
 
-**Enums:**
-
-- `Size`: `S`, `M`, `L`, `XL`, `None`
-- `ProductType`: `CAMISETA_LOCAL`, `CAMISETA_VISITANTE`, `CAMISETA_ALTERNATIVA`, `PANTALONETA`, `MEDIAS`, `GORRA`, `PELUCHE_TIBURON`, `CAMISETA_PERRO`
-
-**Derived (computed in mapper, not stored):**
-
+**Campos derivados** (calculados, no almacenados):
 - `available` = `stock > 0`
-- `lowStock` = `available && stock < 20` (threshold configurable in `application.yml`)
+- `lowStock` = `stock < 20`
 
 ---
 
 ## Endpoints
 
-Base path: `/api/products`
+| Método | Ruta                                       | Descripción                          |
+|--------|--------------------------------------------|--------------------------------------|
+| GET    | `/api/products`                            | Catálogo completo                    |
+| GET    | `/api/products/available`                  | Solo productos en stock              |
+| GET    | `/api/products/{id}`                       | Detalle por ID                       |
+| GET    | `/api/products/search?name=&type=&size=`   | Búsqueda con filtros opcionales      |
 
-| Method | Path                                            | Description                                         |
-|--------|-------------------------------------------------|-----------------------------------------------------|
-| GET    | `/api/products`                                 | Full catalog, sorted A→Z                            |
-| GET    | `/api/products/available`                       | Only in-stock products, sorted A→Z, with low-stock flag |
-| GET    | `/api/products/{id}`                            | Single product detail                               |
-| GET    | `/api/products/search?name=&type=&size=`        | Filtered search (any combination of params)         |
+API de solo lectura — no se procesan compras desde el bot.
 
-### Example response
+### Ejemplo de respuesta
 
 ```json
 {
@@ -89,155 +103,117 @@ Base path: `/api/products`
 }
 ```
 
-### Error response
+---
 
-```json
-{
-  "error": "PRODUCT_NOT_FOUND",
-  "message": "Product not found: id=999"
-}
-```
+## Decisiones de diseño
+
+- **Monolito en capas:** suficiente para el alcance, fácil de evolucionar.
+- **DTOs separados de entidades:** desacopla el contrato HTTP del esquema de BD.
+- **`available` y `lowStock` derivados, no almacenados:** evita inconsistencias.
+- **`BigDecimal` para precios:** precisión exacta (nunca `float`/`double` para dinero).
+- **Enums con `@Enumerated(EnumType.STRING)`:** evita corrupción de datos al reordenar valores.
+- **Solo endpoints GET:** seguridad por diseño — el bot no puede modificar inventario.
+- **H2 en memoria + `data.sql`:** cada arranque carga datos de prueba consistentes.
 
 ---
 
-## Running locally (without Docker)
+## Cómo ejecutar
 
-**Prerequisites:** Java 21, Maven 3.9+
+### Requisitos
+- Docker Desktop
+- Cuenta gratuita de ngrok
+- Token de OpenAI (o Anthropic / Gemini)
+- Bot creado con `@BotFather` en Telegram
 
-```bash
-mvn spring-boot:run
-```
+### 1. Iniciar los contenedores
 
-Then open:
-
-- API: http://localhost:8080/api/products
-- H2 console: http://localhost:8080/h2-console
-  - JDBC URL: `jdbc:h2:mem:juniorstore`
-  - User: `sa`
-  - Password: *(empty)*
-
----
-
-## Running with Docker (API + n8n)
-
-**Prerequisites:** Docker Desktop running.
-
-### 1. Create `.env` in the project root
+Crear archivo `.env` en la raíz:
 
 ```env
-N8N_USER=****
-N8N_PASSWORD=*****
+N8N_USER=admin
+N8N_PASSWORD=changeme123
 ```
 
-### 2. Build and start
+Construir e iniciar:
 
 ```bash
 docker compose up --build
 ```
 
-First run takes ~2-3 minutes (downloads dependencies and the n8n image). Subsequent runs are ~10 seconds.
+Servicios disponibles:
+- API: http://localhost:8080/api/products
+- n8n: http://localhost:5678
 
-### 3. Open the services
+### 2. Exponer n8n con ngrok (para Telegram)
 
-| Service | URL                              | Credentials                    |
-|---------|----------------------------------|--------------------------------|
-| API     | http://localhost:8080/api/products | none                           |
-| n8n     | http://localhost:5678            | `admin` / `changeme123`        |
-
-### Useful Docker commands
+Telegram requiere HTTPS público. En otra terminal:
 
 ```bash
-docker compose up -d            # start in background
-docker compose logs -f api      # follow API logs
-docker compose logs -f n8n      # follow n8n logs
-docker compose stop             # stop containers (preserves data)
-docker compose down             # stop + remove containers (preserves volumes)
-docker compose down -v          # full reset (wipes n8n workflows)
-docker compose up --build       # rebuild after Java code changes
+ngrok http 5678
 ```
 
----
-
-## Connecting n8n to the API
-
-Inside the n8n container, your API is reachable at:
-
-```
-http://api:8080/api/products
-```
-
-**Not** `http://localhost:8080` — from inside the n8n container, `localhost` refers to n8n itself. The hostname `api` matches the service name in `docker-compose.yml` and resolves through Docker's internal network.
-
-This is the most common gotcha. If your HTTP Request node returns "connection refused," check this first.
-
----
-
-## Configuration
-
-`src/main/resources/application.yml` exposes:
+Copiar la URL `https://...ngrok-free.app` y añadirla a `docker-compose.yml`:
 
 ```yaml
-store:
-  low-stock-threshold: 20    # below this, lowStock = true
-  currency: COP
+n8n:
+  environment:
+    N8N_HOST: <hostname-ngrok>
+    N8N_PROTOCOL: https
+    WEBHOOK_URL: https://<hostname-ngrok>/
 ```
 
-Profiles:
+Reiniciar: `docker compose down && docker compose up -d`
 
-- **default** — H2, verbose SQL logging, H2 console enabled (local dev)
-- **docker** — H2, quiet logs, console disabled (containerized)
+### 3. Configurar el flujo en n8n
 
-Activated via `SPRING_PROFILES_ACTIVE` environment variable.
+En `http://localhost:5678`:
+
+1. Construir el workflow:
+    - **Telegram Trigger** → **AI Agent** → **Telegram Send Message**
+    - Sub-nodos del agente: Chat Model (OpenAI), Memory (Simple), 3 HTTP Tools
+2. Cargar credenciales de OpenAI y Telegram
+3. Activar el workflow
+
+### 4. Probar el bot
+
+Buscar el bot en Telegram y enviar mensajes:
+
+- *"¿Qué productos tienen?"*
+- *"¿Tienen camiseta local talla M?"*
+- *"¿Cuánto cuesta el peluche del tiburón?"*
 
 ---
 
-## Seed data
-
-Defined in `src/main/resources/data.sql`. Loaded on every startup (DB resets on restart since `ddl-auto=create-drop`).
-
-Includes a mix of in-stock, low-stock, and out-of-stock products across all product types and sizes — designed to give the chatbot interesting things to say during demos.
-
----
-
-## Project structure
+## Estructura del proyecto
 
 ```
-junior-n8n-api/
+JuniorN8NApi/
 ├── src/main/
 │   ├── java/com/carinosas/juniorn8napi/
-│   │   ├── JuniorN8nApiApplication.java
-│   │   └── product/
-│   │       ├── controller/ProductController.java
-│   │       ├── service/ProductService.java
-│   │       ├── repository/ProductRepository.java
-│   │       ├── domain/
-│   │       │   ├── Product.java
-│   │       │   ├── Size.java
-│   │       │   └── ProductType.java
-│   │       ├── dto/ProductResponse.java
-│   │       ├── mapper/ProductMapper.java
-│   │       └── exception/
-│   │           ├── ProductNotFoundException.java
-│   │           └── GlobalExceptionHandler.java
+│   │   └── product/   (controller, service, repository, domain, dto, mapper, exception)
 │   └── resources/
 │       ├── application.yml
 │       ├── application-docker.yml
 │       └── data.sql
 ├── pom.xml
 ├── Dockerfile
-├── .dockerignore
 ├── docker-compose.yml
-├── .env                    (gitignored)
+├── .env
 └── README.md
 ```
 
 ---
 
-## Future improvements (out of scope for the mockup)
+## Datos de prueba
 
-- Swap H2 for PostgreSQL (separate container in compose)
-- Add purchase/reservation endpoints with proper concurrency control
-- Add authentication for write endpoints
-- Migration management with Flyway/Liquibase
-- Integration tests with Testcontainers
-- OpenAPI/Swagger UI for n8n auto-discovery
+`data.sql` carga productos al arrancar: camisetas locales/visitantes/alternativas en varias tallas, pantalonetas, medias, gorras, peluches del tiburón y camisetas para perros. Incluye productos agotados, con stock bajo y disponibles para demostrar todos los estados del bot.
+
+---
+
+## Limitaciones conocidas (alcance de mockup)
+
+- Datos en memoria → se reinician en cada arranque
+- Sin autenticación
+- Sin endpoints de compra (fuera de alcance)
+- ngrok con URL temporal (cambia al reiniciar en plan gratuito)
+- Sin tests automatizados
